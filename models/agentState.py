@@ -9,6 +9,7 @@ class OrderDraft(BaseModel):
     item_name: str | None = None
     item_info: str | None = None
     item_quantity: int | None = None
+    confirmed: bool | None = None
 
 
 class AgentState(BaseModel):
