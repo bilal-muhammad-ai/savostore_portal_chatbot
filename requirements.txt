@@ -3,3 +3,8 @@ langchain[groq]
 langgraph
 langchain-core
 redis
+pypdf
+pinecone
+langchain-pinecone
+langchain-huggingface
+huggingface-hub

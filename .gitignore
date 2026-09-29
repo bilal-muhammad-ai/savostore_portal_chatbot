@@ -62,3 +62,7 @@ Thumbs.db
 .cache/
 tmp/
 temp/
+
+# Hugging Face / sentence-transformers local caches
+.hf_cache/
+sentence-transformers/

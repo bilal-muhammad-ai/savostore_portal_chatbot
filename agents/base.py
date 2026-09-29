@@ -1,5 +1,6 @@
 """Order agent entrypoint: intent-routed step handling."""
 
+from agents.faq import get_faq_agent
 from agents.router import classify_intent
 from agents.steps import get_agent_for_step
 from helpers.order_progress import (
@@ -22,9 +23,6 @@ _DONE_REPLY = (
     "Start a new session if you need another order."
 )
 
-_FAQ_STUB = (
-    "I can help with FAQs soon. For now, let's keep building your order."
-)
 _EDIT_STUB = (
     "Editing order details mid-flow is coming soon. "
     "For now, let's keep building your order."
@@ -45,6 +43,13 @@ def _handle_continue(state: AgentState, query: str) -> tuple[str, AgentState]:
     tool_calls = extract_tool_calls(result["messages"])
     state = apply_tool_effects(state, tool_calls)
     return reply, state
+
+
+def _handle_faq(query: str) -> str:
+    agent = get_faq_agent()
+    result = agent.invoke({"messages": [{"role": "user", "content": query}]})
+    last = result["messages"][-1]
+    return last.content if isinstance(last.content, str) else str(last.content)
 
 
 def run(request: UserQuery) -> str:
@@ -68,7 +73,7 @@ def run(request: UserQuery) -> str:
     if intent == "show_draft":
         reply = f"{format_draft_for_user(state)}\n\n{resume_prompt(state)}"
     elif intent == "faq":
-        reply = f"{_FAQ_STUB}\n\n{resume_prompt(state)}"
+        reply = f"{_handle_faq(request.query)}\n\n{resume_prompt(state)}"
     elif intent == "edit":
         reply = f"{_EDIT_STUB}\n\n{resume_prompt(state)}"
     else:

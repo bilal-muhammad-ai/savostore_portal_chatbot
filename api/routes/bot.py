@@ -14,3 +14,8 @@ class ChatRequest(UserQuery):
 @router.post("/chat")
 def chat(request: ChatRequest):
     return {"message": run(request)}
+
+
+@router.get("/faq")
+def faq():
+    return {"message": "Hello World"}
