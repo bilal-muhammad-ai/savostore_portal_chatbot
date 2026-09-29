@@ -1,7 +1,13 @@
-"""Order agent entrypoint: progress-driven step routing."""
+"""Order agent entrypoint: intent-routed step handling."""
 
+from agents.router import classify_intent
 from agents.steps import get_agent_for_step
-from helpers.order_progress import format_progress_context, sync_step
+from helpers.order_progress import (
+    format_draft_for_user,
+    format_progress_context,
+    resume_prompt,
+    sync_step,
+)
 from helpers.redis_store import get_state, save_state
 from helpers.state_updates import (
     append_and_trim_messages,
@@ -15,6 +21,30 @@ _DONE_REPLY = (
     "Your order draft is already complete and confirmed. "
     "Start a new session if you need another order."
 )
+
+_FAQ_STUB = (
+    "I can help with FAQs soon. For now, let's keep building your order."
+)
+_EDIT_STUB = (
+    "Editing order details mid-flow is coming soon. "
+    "For now, let's keep building your order."
+)
+
+
+def _handle_continue(state: AgentState, query: str) -> tuple[str, AgentState]:
+    progress = format_progress_context(state)
+    invoke_messages = [
+        {"role": "system", "content": progress},
+        *state.messages,
+        {"role": "user", "content": query},
+    ]
+    agent = get_agent_for_step(state.step)
+    result = agent.invoke({"messages": invoke_messages})
+    last = result["messages"][-1]
+    reply = last.content if isinstance(last.content, str) else str(last.content)
+    tool_calls = extract_tool_calls(result["messages"])
+    state = apply_tool_effects(state, tool_calls)
+    return reply, state
 
 
 def run(request: UserQuery) -> str:
@@ -33,20 +63,17 @@ def run(request: UserQuery) -> str:
         save_state(state)
         return _DONE_REPLY
 
-    progress = format_progress_context(state)
-    invoke_messages = [
-        {"role": "system", "content": progress},
-        *state.messages,
-        {"role": "user", "content": request.query},
-    ]
+    intent = classify_intent(request.query, state)
 
-    agent = get_agent_for_step(state.step)
-    result = agent.invoke({"messages": invoke_messages})
-    last = result["messages"][-1]
-    reply = last.content if isinstance(last.content, str) else str(last.content)
+    if intent == "show_draft":
+        reply = f"{format_draft_for_user(state)}\n\n{resume_prompt(state)}"
+    elif intent == "faq":
+        reply = f"{_FAQ_STUB}\n\n{resume_prompt(state)}"
+    elif intent == "edit":
+        reply = f"{_EDIT_STUB}\n\n{resume_prompt(state)}"
+    else:
+        reply, state = _handle_continue(state, request.query)
 
     state = append_and_trim_messages(state, request.query, reply)
-    tool_calls = extract_tool_calls(result["messages"])
-    state = apply_tool_effects(state, tool_calls)
     save_state(state)
     return reply

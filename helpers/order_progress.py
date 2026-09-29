@@ -86,3 +86,51 @@ def format_progress_context(state: AgentState) -> str:
         lines.append("Do not ask for later fields. Use tools to record answers.")
 
     return "\n".join(lines)
+
+
+_FIELD_LABELS: dict[str, str] = {
+    "agreement_accepted": "Agreement",
+    "currency_id": "Currency",
+    "warehouse_id": "Warehouse",
+    "amazon_url": "Amazon URL",
+    "item_name": "Item name",
+    "item_info": "Item info",
+    "item_quantity": "Item quantity",
+}
+
+
+def format_draft_for_user(state: AgentState) -> str:
+    """Human-readable draft summary for the user (filled vs not set)."""
+    lines = ["Here's your order so far:"]
+    for field, _, _ in FIELD_ORDER:
+        label = _FIELD_LABELS.get(field, field)
+        value = getattr(state.order, field)
+        if field == "agreement_accepted":
+            if value is True:
+                lines.append(f"- {label}: accepted")
+            elif value is False:
+                lines.append(f"- {label}: declined")
+            else:
+                lines.append(f"- {label}: not set yet")
+        elif value is None:
+            lines.append(f"- {label}: not set yet")
+        else:
+            lines.append(f"- {label}: {value}")
+
+    if state.order.confirmed is True:
+        lines.append("- Confirmed: yes")
+    elif next_missing(state.order) is None:
+        lines.append("- Confirmed: not yet")
+
+    return "\n".join(lines)
+
+
+def resume_prompt(state: AgentState) -> str:
+    """One-line nudge telling the user what to do next."""
+    if state.order.confirmed is True:
+        return "Your order is already confirmed."
+    missing = next_missing(state.order)
+    if missing is None:
+        return "Next: Please confirm or decline the order."
+    _, prompt = missing
+    return f"Next: {prompt}."
