@@ -2,4 +2,5 @@ fastapi[standard]
 langchain[groq]
 langgraph
 langchain-core
+langchain-typesafe
 redis

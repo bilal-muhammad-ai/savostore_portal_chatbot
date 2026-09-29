@@ -1,12 +1,11 @@
-"""LLM intent classifier for order-wizard message routing."""
+"""Jev intent classifier for order-wizard message routing."""
 
 from __future__ import annotations
 
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from langchain_typesafe import Choice, TypeSafeClassifier
 
-from config import llm
 from helpers.order_progress import format_progress_context
 from models.agentState import AgentState
 
@@ -16,44 +15,51 @@ _VALID_INTENTS: frozenset[str] = frozenset(
     ("continue_order", "show_draft", "faq", "edit")
 )
 _DEFAULT_INTENT: Intent = "continue_order"
+_MIN_CONFIDENCE = 0.6
+
+_INTENT_QUESTION = Choice(
+    instructions=(
+        "Classify the user message for a Savostore order wizard. "
+        "When unsure, prefer continue_order."
+    ),
+    criteria={
+        "continue_order": "Answering or progressing the current order step.",
+        "show_draft": "Wants to see filled or missing order draft info.",
+        "faq": "Side question (shipping, warehouse address, prohibited items, etc.).",
+        "edit": "Wants to change a field already filled in the draft.",
+    },
+)
+
+_classifier: TypeSafeClassifier | None = None
 
 
-class RouteDecision(BaseModel):
-    intent: Intent = Field(
-        description=(
-            "continue_order: user is answering or progressing the current order step. "
-            "show_draft: user wants to see filled/missing order draft info. "
-            "faq: side question (shipping, warehouse address, prohibited items, etc.). "
-            "edit: user wants to change a field already filled in the draft."
-        )
-    )
+def _get_classifier() -> TypeSafeClassifier:
+    """Lazy-init so missing TYPESAFE_API_KEY fails at classify time, not import."""
+    global _classifier
+    if _classifier is None:
+        _classifier = TypeSafeClassifier()
+    return _classifier
 
 
 def classify_intent(query: str, state: AgentState) -> Intent:
-    """Classify the user message; default to continue_order on failure."""
+    """Classify the user message via Jev; default to continue_order on failure."""
     progress = format_progress_context(state)
-    system = (
-        "Classify the user's message for a Savostore order wizard.\n"
+    state_text = (
+        f"Savostore order wizard.\n"
         f"Current step: {state.step}\n"
-        f"{progress}\n\n"
-        "Rules:\n"
-        "- If they are clearly providing the next field value or accepting/declining "
-        "the current step, use continue_order.\n"
-        "- If they want to see what they have filled so far, use show_draft.\n"
-        "- If they ask a side question unrelated to filling the current field, use faq.\n"
-        "- If they want to change a value already recorded, use edit.\n"
-        "- When unsure, prefer continue_order."
+        f"{progress}\n"
+        f"User message: {query}"
     )
     try:
-        router_llm = llm.with_structured_output(RouteDecision)
-        decision = router_llm.invoke(
-            [
-                {"role": "system", "content": system},
-                {"role": "user", "content": query},
-            ]
+        response = _get_classifier().invoke(
+            {
+                "state": state_text,
+                "questions": {"intent": _INTENT_QUESTION},
+            }
         )
-        intent = getattr(decision, "intent", None)
-        if intent in _VALID_INTENTS:
+        answer = response.choices["intent"]
+        intent = answer.choice
+        if intent in _VALID_INTENTS and answer.confidence >= _MIN_CONFIDENCE:
             return intent  # type: ignore[return-value]
     except Exception:
         pass
